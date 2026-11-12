@@ -2,8 +2,6 @@ name: Compilar Clipazos
 
 on:
   push:
-    paths:
-      - "Clipazos-Android.zip"
   workflow_dispatch:
 
 permissions:
