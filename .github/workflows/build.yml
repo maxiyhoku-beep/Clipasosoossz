@@ -1,0 +1,66 @@
+name: Compilar Clipazos
+
+on:
+  push:
+    paths:
+      - "Clipazos-Android.zip"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extraer el ZIP del proyecto
+        run: |
+          ZIP=$(ls ./*.zip 2>/dev/null | head -n1)
+          if [ -z "$ZIP" ]; then echo "No hay ningún .zip en la raíz del repositorio"; exit 1; fi
+          rm -rf _src && mkdir _src && unzip -q "$ZIP" -d _src
+          F=$(find _src -maxdepth 3 -name settings.gradle.kts | head -n1)
+          if [ -z "$F" ]; then echo "El ZIP no contiene settings.gradle.kts"; exit 1; fi
+          echo "PROJECT_DIR=$(dirname "$F")" >> "$GITHUB_ENV"
+
+      - name: Incluir el modelo de voz en español (gratis, Apache 2.0)
+        run: |
+          set -e
+          mkdir -p "$PROJECT_DIR/app/src/main/assets"
+          curl -fL --retry 3 -o vosk.zip https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip \
+            || curl -fL --retry 3 -o vosk.zip https://huggingface.co/mychen76/vosk-models/resolve/main/es/vosk-model-small-es-0.42.zip
+          unzip -q vosk.zip -d _model
+          MODEL_DIR=$(find _model -maxdepth 2 -type d -name "vosk-model*" | head -n1)
+          rm -rf "$PROJECT_DIR/app/src/main/assets/model-es"
+          mv "$MODEL_DIR" "$PROJECT_DIR/app/src/main/assets/model-es"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Pruebas unitarias
+        continue-on-error: true
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Compilar el APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Reunir el APK
+        run: |
+          mkdir -p out
+          cp "$PROJECT_DIR"/app/build/outputs/apk/release/*.apk out/Clipazos.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Clipazos-APK
+          path: out/Clipazos.apk
+          if-no-files-found: error
